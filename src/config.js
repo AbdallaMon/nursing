@@ -7,6 +7,7 @@ const clamp = (value, fallback, min, max) => {
 const upstream = new URL(
   process.env.UPSTREAM_URL ?? "http://mhealthmobasn.cu.edu.eg/",
 );
+const remoteMode = process.env.REMOTE_MODE === "1";
 
 if (upstream.protocol !== "http:" && upstream.protocol !== "https:") {
   throw new Error("UPSTREAM_URL must use HTTP or HTTPS");
@@ -14,8 +15,13 @@ if (upstream.protocol !== "http:" && upstream.protocol !== "https:") {
 
 export const config = Object.freeze({
   host: "127.0.0.1",
-  port: clamp(process.env.PORT, 4317, 1024, 65535),
-  remoteMode: process.env.REMOTE_MODE === "1",
+  port: clamp(
+    process.env.DASHBOARD_PORT ?? (remoteMode ? undefined : process.env.PORT),
+    4317,
+    1024,
+    65535,
+  ),
+  remoteMode,
   remoteBrowserUrl:
     "/browser/vnc_lite.html?autoconnect=true&resize=scale&reconnect=true&path=browser/websockify",
   upstream,

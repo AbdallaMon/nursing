@@ -53,6 +53,7 @@ UPSTREAM_URL=http://mhealthmobasn.cu.edu.eg/
 
 - `APP_PASSWORD` مطلوب، ولا يعمل الـContainer إذا كان أقل من 16 أو أكثر من 72 حرفًا.
 - لإنشاء قيمة آمنة وسهلة النسخ على Linux استخدم `openssl rand -hex 24` ثم ضع الناتج كقيمة `APP_PASSWORD`.
+- لا تضف أو تغيّر متغير `PORT` في Coolify؛ منفذ Node الداخلي مثبت باسم `DASHBOARD_PORT=4317` حتى لا يتعارض مع VNC على `5900`.
 - لا تجعل `APP_PASSWORD` Build Variable؛ هي Runtime secret فقط.
 - لا تستخدم نفس كلمة مرور Coolify أو VPS.
 - لا تضف `PUPPETEER_BROWSER_WSENDPOINT`؛ التطبيق لا يستخدم Browserless حاليًا.
