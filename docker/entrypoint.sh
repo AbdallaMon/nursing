@@ -21,6 +21,8 @@ fi
 
 umask 077
 printf '%s\n' "$app_password" | htpasswd -ciB -C 12 /etc/nginx/.htpasswd "$app_username" >/dev/null 2>&1
+chown root:www-data /etc/nginx/.htpasswd
+chmod 0640 /etc/nginx/.htpasswd
 unset app_password APP_PASSWORD
 
 rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
