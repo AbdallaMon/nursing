@@ -1,0 +1,20 @@
+{
+  "name": "nursing-register-login-helper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local, human-in-the-loop helper for the nursing registration sign-in page.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/unit/*.test.js",
+    "test:browser": "node --test test/integration/playwright-login.test.js",
+    "verify:server": "node scripts/verify-server.js",
+    "verify:upstream": "node scripts/verify-upstream.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "playwright-core": "^1.62.1"
+  }
+}

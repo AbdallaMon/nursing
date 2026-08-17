@@ -1,0 +1,29 @@
+services:
+  nursing-register:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      APP_USERNAME: ${APP_USERNAME:-admin}
+      APP_PASSWORD: ${APP_PASSWORD:?}
+      UPSTREAM_URL: ${UPSTREAM_URL:-http://mhealthmobasn.cu.edu.eg/}
+      REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-400000}
+      MIN_POST_INTERVAL_MS: ${MIN_POST_INTERVAL_MS:-30000}
+      REMOTE_MODE: "1"
+      NO_OPEN: "1"
+      HEADLESS: "0"
+      BROWSER_CHANNEL: chromium
+      DISPLAY: ":99"
+      PORT: "4317"
+      REMOTE_SCREEN_WIDTH: "1440"
+      REMOTE_SCREEN_HEIGHT: "900"
+    expose:
+      - "3000"
+    shm_size: "1gb"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3000/healthz"]
+      interval: 20s
+      timeout: 5s
+      start_period: 40s
+      retries: 5

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>مساعد تسجيل الرغبات</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p id="deploymentModeLabel" class="eyebrow">يعمل على جهازك أو الـVPS</p>
+        <h1>مساعد تسجيل الدخول</h1>
+        <p>
+          Chrome متحكم فيه بجلسة واحدة، وطلب واحد في كل محاولة، وCaptcha يدوية. في وضع
+          الـVPS تخرج طلبات الموقع من السيرفر وتظهر نافذة Chrome داخله هنا.
+        </p>
+      </header>
+
+      <section class="notice" aria-label="تنبيه الخصوصية">
+        <strong>خصوصيتك:</strong>
+        لا نحفظ بياناتك افتراضيًا ولا نضعها في Logs. خيار التذكر الاختياري أدناه يحفظ
+        الرقمين داخل Local Storage في جهازك بشكل غير مشفر. استخدم HTTPS وكلمة مرور قوية
+        عند تشغيله على VPS؛ الموقع الخارجي نفسه يستخدم HTTP غير مشفر.
+      </section>
+
+      <section class="card status-card" aria-live="polite">
+        <div>
+          <span id="statusBadge" class="badge">غير مجهز</span>
+          <h2 id="statusTitle">ابدأ بتجهيز جلسة</h2>
+          <p id="statusMessage">سيتم تحميل صفحة الدخول والكابتشا بنفس الـSession.</p>
+        </div>
+        <dl class="metrics">
+          <div><dt>المحاولات</dt><dd id="attemptCount">0</dd></div>
+          <div><dt>آخر زمن</dt><dd id="lastDuration">—</dd></div>
+          <div><dt>Timeout</dt><dd id="timeoutValue">—</dd></div>
+        </dl>
+      </section>
+
+      <section id="remoteBrowserCard" class="card browser-card hidden" aria-label="متصفح VPS">
+        <div class="browser-heading">
+          <div>
+            <p class="eyebrow">Chrome يعمل على السيرفر</p>
+            <h2>متصفح الـVPS</h2>
+            <p>كل طلبات موقع الجامعة داخل هذه النافذة تخرج من اتصال الـVPS.</p>
+          </div>
+          <div class="browser-actions">
+            <button id="toggleBrowserButton" type="button">إظهار المتصفح</button>
+            <button id="openBrowserButton" type="button">فتح في تبويب</button>
+          </div>
+        </div>
+        <div id="remoteBrowserPanel" class="browser-panel hidden">
+          <iframe
+            id="remoteBrowserFrame"
+            title="Chrome الموجود على VPS"
+            allow="clipboard-read; clipboard-write; fullscreen"
+          ></iframe>
+        </div>
+        <p class="post-note">لا تغلق Chrome من داخله أثناء وجود POST بحالة Pending.</p>
+      </section>
+
+      <section class="card request-card" aria-live="polite">
+        <div class="log-heading">
+          <div>
+            <p class="eyebrow">الصفحات والملفات والكابتشا</p>
+            <h2>طلبات GET</h2>
+          </div>
+          <span class="memory-label">Refresh يصفر العدادات التاريخية</span>
+        </div>
+        <dl class="request-metrics">
+          <div class="active-metric"><dt>GET شغال</dt><dd id="activeGetRequests">0</dd></div>
+          <div><dt>إجمالي GET</dt><dd id="getRequests">0</dd></div>
+          <div><dt>GET اكتمل</dt><dd id="completedGetRequests">0</dd></div>
+          <div><dt>GET فشل</dt><dd id="failedGetRequests">0</dd></div>
+        </dl>
+      </section>
+
+      <section class="card post-card" aria-live="polite">
+        <div class="post-heading">
+          <div>
+            <p class="eyebrow">تسجيل الدخول فقط</p>
+            <h2>آخر طلب POST</h2>
+          </div>
+          <span id="lastPostBadge" class="post-badge" data-outcome="none">لم يُرسل</span>
+        </div>
+        <div class="post-result">
+          <strong id="lastPostTitle">لا توجد محاولة POST بعد</strong>
+          <p id="lastPostMessage">بعد إرسال تسجيل الدخول ستظهر النتيجة هنا.</p>
+        </div>
+        <dl class="post-metrics">
+          <div><dt>POST شغال</dt><dd id="activePostRequests">0</dd></div>
+          <div><dt>إجمالي POST</dt><dd id="postRequests">0</dd></div>
+          <div><dt>اكتمل شبكيًا</dt><dd id="completedPostRequests">0</dd></div>
+          <div><dt>فشل شبكيًا</dt><dd id="failedPostRequests">0</dd></div>
+          <div><dt>المحاولة</dt><dd id="lastPostAttempt">—</dd></div>
+          <div><dt>HTTP</dt><dd id="lastPostHttp">—</dd></div>
+          <div><dt>المدة</dt><dd id="lastPostDuration">—</dd></div>
+        </dl>
+        <p class="post-note">HTTP 200 لا يعني نجاح الدخول؛ النتيجة تعتمد على رد التطبيق نفسه.</p>
+      </section>
+
+      <section class="card log-card" aria-live="polite">
+        <div class="log-heading">
+          <div>
+            <p class="eyebrow">تحديث تلقائي بدون Refresh</p>
+            <h2>سجل التشغيل</h2>
+          </div>
+          <span class="memory-label">آخر 30 حدثًا — Refresh يمسح السجل</span>
+        </div>
+        <div class="last-error">
+          <strong>آخر خطأ</strong>
+          <span id="lastErrorText">لا يوجد خطأ حتى الآن.</span>
+        </div>
+        <ol id="activityLog" class="activity-log">
+          <li class="empty-log">في انتظار أول حدث...</li>
+        </ol>
+      </section>
+
+      <section class="card controls">
+        <div class="button-row">
+          <button id="prepareButton" class="primary" type="button">تجهيز جلسة</button>
+          <button id="newSessionButton" type="button">جلسة جديدة</button>
+          <button id="checkButton" class="hidden" type="button">فحص الجلسة</button>
+        </div>
+
+        <form id="loginForm" autocomplete="off">
+          <label>
+            <span>رقم الخريج</span>
+            <input id="graduateNumber" inputmode="numeric" maxlength="14" required disabled />
+          </label>
+          <label>
+            <span>الرقم القومي</span>
+            <input
+              id="nationalNumber"
+              type="password"
+              inputmode="numeric"
+              maxlength="14"
+              required
+              disabled
+            />
+          </label>
+
+          <label class="auto-option sensitive-option">
+            <input id="rememberCredentials" type="checkbox" />
+            <span>
+              تذكّر رقم الخريج والرقم القومي على هذا الجهاز. التخزين محلي وغير مشفر؛ لا
+              تُحفظ الكابتشا.
+            </span>
+          </label>
+
+          <div class="captcha-panel">
+            <div class="captcha-frame">
+              <img id="captchaImage" class="hidden" alt="الكود التأكيدي" />
+              <span id="captchaPlaceholder">جهّز الجلسة لعرض الكود</span>
+            </div>
+            <button id="refreshCaptchaButton" type="button" disabled>كود جديد</button>
+          </div>
+
+          <label>
+            <span>الكود التأكيدي</span>
+            <input id="captchaValue" inputmode="numeric" maxlength="10" required disabled />
+          </label>
+
+          <label class="auto-option">
+            <input id="autoPrepare" type="checkbox" checked />
+            <span>بعد رسالة ضغط واضحة، انتظر ثم جهّز Captcha جديدة تلقائيًا</span>
+          </label>
+
+          <button id="submitButton" class="primary submit" type="submit" disabled>
+            إرسال محاولة واحدة
+          </button>
+        </form>
+
+        <div id="countdownPanel" class="countdown hidden">
+          <p id="countdownText"></p>
+          <button id="cancelCountdownButton" type="button">إلغاء التجهيز التلقائي</button>
+        </div>
+      </section>
+
+      <section class="card details">
+        <h2>قواعد التشغيل</h2>
+        <ul>
+          <li>لن يتم إرسال POST جديد أثناء وجود طلب جارٍ.</li>
+          <li>عند Timeout نفحص الجلسة أولًا؛ لا نكرر POST مباشرة.</li>
+          <li>كل محاولة جديدة تستخدم Form state وCaptcha جديدين.</li>
+          <li>نجاح HTTP 200 وحده لا يُعتبر نجاح تسجيل الدخول.</li>
+        </ul>
+        <button id="clearButton" class="danger" type="button">مسح الحقول والجلسة</button>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
