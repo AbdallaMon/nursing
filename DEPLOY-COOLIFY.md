@@ -11,11 +11,20 @@
 
 المواصفات الموصى بها: Ubuntu حديث، 2 vCPU، و4 GB RAM. يمكن أن يعمل على 2 GB لكن Coolify وChromium قد يستهلكان الذاكرة تحت الضغط. اترك مساحة تخزين لا تقل عن 10 GB لبناء صورة Chromium.
 
+### إعداد AWS EC2 الموصى به
+
+- Architecture: ‏`x86_64` لتقليل مفاجآت توافق Chromium؛ لا تختَر Graviton لهذه النسخة الأولى.
+- لو Coolify وهذا التطبيق فقط: `t3.medium` بذاكرة 4 GB هو الحد العملي.
+- لو Browserless يعمل على نفس EC2: استخدم `t3.large` بذاكرة 8 GB، وهو الاختيار الموصى به هنا.
+- Storage: ‏40 GB من نوع `gp3` حتى تتوفر مساحة لصور Docker وChromium والـbuild cache.
+- اربط Elastic IP بالـinstance حتى لا يتغير عنوان DNS عند الإيقاف والتشغيل.
+- Security Group: افتح `80` و`443` للعامة، و`22` لعنوان IP الخاص بك فقط. لا تفتح `3000` أو `5900` أو `6080`.
+
 ## 1. قبل الرفع
 
 1. غيّر أي Token أو كلمة مرور سبق إرسالها في محادثة أو مشاركتها مع شخص آخر.
 2. ضع هذا المجلد في Git repository خاص. لا تضع ملفات `.env` أو كلمات مرور في Git.
-3. أنشئ DNS Record من النوع `A` مثل `register.example.com` يشير إلى IP الـVPS.
+3. أنشئ DNS Record من النوع `A` للاسم `nursing.abdallaabdelsabour.com` يشير إلى Elastic IP الخاص بالـVPS.
 4. تأكد أن Coolify يعمل على السيرفر وأن Proxy الخاص به سليم.
 
 ## 2. إنشاء التطبيق في Coolify
@@ -53,12 +62,14 @@ UPSTREAM_URL=http://mhealthmobasn.cu.edu.eg/
 داخل Service `nursing-register` ضع الدومين بالشكل التالي:
 
 ```text
-https://register.example.com:3000
+https://nursing.abdallaabdelsabour.com:3000
 ```
 
 الرقم `3000` يخبر Proxy الخاص بـCoolify بالمنفذ الداخلي للحاوية، بينما المستخدم يفتح HTTPS العادي بدون كتابة المنفذ. فعّل Generate/Let's Encrypt Certificate إن لم يفعّله Coolify تلقائيًا.
 
 لا تضف Host Port Mapping، ولا تفتح المنافذ `5900` أو `6080` في Firewall. هذان المنفذان داخليان فقط، وnoVNC يصل إليهما من خلال Nginx المحمي.
+
+الدومين لا يوضع في `.env`: سجل DNS يُضاف عند مزود DNS، ثم يُكتب عنوان HTTPS السابق في حقل Domains داخل Coolify.
 
 ## 5. النشر
 

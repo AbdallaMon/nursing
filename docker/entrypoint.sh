@@ -20,7 +20,7 @@ if [[ "$app_password" == *$'\n'* || "$app_password" == *$'\r'* ]]; then
 fi
 
 umask 077
-printf '%s\n' "$app_password" | htpasswd -ciB -C 12 /etc/nginx/.htpasswd "$app_username" >/dev/null
+printf '%s\n' "$app_password" | htpasswd -ciB -C 12 /etc/nginx/.htpasswd "$app_username" >/dev/null 2>&1
 unset app_password APP_PASSWORD
 
 rm -f /tmp/.X99-lock /tmp/.X11-unix/X99

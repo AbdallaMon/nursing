@@ -34,7 +34,7 @@ RUN npm ci --omit=dev \
 COPY . .
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/supervisord.conf /etc/supervisor/conf.d/nursing-register.conf
-RUN chmod 0755 /app/docker/entrypoint.sh \
+RUN chmod 0755 /app/docker/entrypoint.sh /app/docker/start-nginx.sh \
     && mkdir -p /run/nginx /var/log/supervisor
 
 EXPOSE 3000
