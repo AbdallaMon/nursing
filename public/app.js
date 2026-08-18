@@ -2,6 +2,9 @@ const elements = {
   statusBadge: document.querySelector("#statusBadge"),
   statusTitle: document.querySelector("#statusTitle"),
   statusMessage: document.querySelector("#statusMessage"),
+  sessionSavedBadge: document.querySelector("#sessionSavedBadge"),
+  currentPageLabel: document.querySelector("#currentPageLabel"),
+  currentPagePath: document.querySelector("#currentPagePath"),
   attemptCount: document.querySelector("#attemptCount"),
   lastDuration: document.querySelector("#lastDuration"),
   timeoutValue: document.querySelector("#timeoutValue"),
@@ -81,6 +84,7 @@ function configureRemoteBrowser(settings = {}) {
     ? "الطلبات تخرج من الـVPS"
     : "الطلبات تخرج من جهازك الحالي";
   elements.remoteBrowserCard.classList.toggle("hidden", !remoteBrowserUrl);
+  if (remoteBrowserUrl) toggleRemoteBrowser(true);
 }
 
 function ensureRemoteBrowserLoaded() {
@@ -146,10 +150,11 @@ async function prepare(reset = false) {
   );
   if (!payload) return;
   currentState = payload.state;
-  await loadCaptcha();
+  if (currentState.phase === "prepared") await loadCaptcha();
+  else revokeCaptchaUrl();
   elements.captchaValue.value = "";
   renderState();
-  elements.captchaValue.focus();
+  if (currentState.phase === "prepared") elements.captchaValue.focus();
 }
 
 async function loadCaptcha() {
@@ -285,6 +290,12 @@ function renderState(override = {}) {
   elements.statusBadge.dataset.phase = state.phase;
   elements.statusTitle.textContent = title;
   elements.statusMessage.textContent = state.message;
+  elements.sessionSavedBadge.textContent = state.sessionPersisted
+    ? "الجلسة محفوظة على الـVPS"
+    : "لا توجد جلسة محفوظة";
+  elements.sessionSavedBadge.dataset.saved = state.sessionPersisted ? "true" : "false";
+  elements.currentPageLabel.textContent = state.currentPage?.label ?? "Chrome غير مفتوح";
+  elements.currentPagePath.textContent = state.currentPage?.path ?? "—";
   elements.attemptCount.textContent = String(state.attempt ?? 0);
   elements.lastDuration.textContent = state.lastDurationMs
     ? `${(state.lastDurationMs / 1000).toFixed(2)} ث`
@@ -317,8 +328,13 @@ function renderState(override = {}) {
 }
 
 function renderEvents() {
+  const visibleEvents = currentEvents.filter((event) => {
+    if (!event.type?.startsWith("http.")) return true;
+    const urlPath = event.details?.urlPath ?? "";
+    return /\.aspx$/i.test(urlPath) && !/\/CodeImage\.aspx$/i.test(urlPath);
+  });
   elements.activityLog.replaceChildren();
-  if (!currentEvents.length) {
+  if (!visibleEvents.length) {
     const empty = document.createElement("li");
     empty.className = "empty-log";
     empty.textContent = "في انتظار أول حدث...";
@@ -327,7 +343,7 @@ function renderEvents() {
     return;
   }
 
-  for (const event of currentEvents) {
+  for (const event of visibleEvents) {
     const item = document.createElement("li");
     item.className = `log-item log-${event.level}`;
 
@@ -354,7 +370,7 @@ function renderEvents() {
     elements.activityLog.append(item);
   }
 
-  const latestError = currentEvents.find((event) => event.level === "error");
+  const latestError = visibleEvents.find((event) => event.level === "error");
   elements.lastErrorText.textContent = latestError
     ? `${latestError.message}${formatEventDetails(latestError.details) ? ` — ${formatEventDetails(latestError.details)}` : ""}`
     : "لا يوجد خطأ حتى الآن.";

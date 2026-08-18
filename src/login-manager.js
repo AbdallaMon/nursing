@@ -1,4 +1,6 @@
 import { chromium } from "playwright-core";
+import { chmod, mkdir, readFile, rm } from "node:fs/promises";
+import path from "node:path";
 import { classifyLoginResponse } from "./html.js";
 
 const SELECTORS = Object.freeze({
@@ -8,6 +10,8 @@ const SELECTORS = Object.freeze({
   captcha: 'input[name$=":txtCertainNumber"]',
   submit: 'input[name$=":btnOk"]',
   captchaImage: 'img[src*="CodeImage.aspx"]',
+  personalForm: 'form[action*="personal.aspx"]',
+  acceptAssignment: 'input[name$=":btnAcceptTakleef"]',
 });
 
 export class LoginManager {
@@ -22,6 +26,9 @@ export class LoginManager {
   #random;
   #events = [];
   #eventSequence = 0;
+  #authenticated = false;
+  #persistedSessionAvailable = false;
+  #restoreAttempted = false;
   #trackedRequests = new Map();
   #requestStats = {
     total: 0,
@@ -61,6 +68,9 @@ export class LoginManager {
       busy: this.#busy,
       hasCaptcha: Boolean(this.#captcha),
       postPending: Boolean(this.#pendingPost),
+      authenticated: this.#authenticated,
+      sessionPersisted: this.#persistedSessionAvailable,
+      currentPage: this.#currentPageSnapshot(),
       requestStats: this.#requestStatsSnapshot(),
     };
   }
@@ -109,13 +119,21 @@ export class LoginManager {
           409,
         );
       }
-      if (reset) await this.#resetBrowser();
+      if (reset) {
+        await this.#clearPersistedSession();
+        await this.#resetBrowser();
+      }
       this.#log(
         "info",
         "session.prepare_started",
         reset ? "جاري إنشاء Chrome وSession جديدين." : "جاري تجهيز صفحة دخول جديدة.",
       );
       await this.#ensureBrowser();
+
+      if (!reset && this.#persistedSessionAvailable && !this.#restoreAttempted) {
+        const restored = await this.#tryRestoreSession();
+        if (restored) return restored;
+      }
 
       this.state.phase = "preparing";
       this.state.message = "جاري تحميل صفحة الدخول داخل Chrome...";
@@ -274,24 +292,8 @@ export class LoginManager {
 
       const currentUrl = new URL(this.#page.url());
       if (!currentUrl.pathname.toLowerCase().endsWith("/signin.aspx")) {
-        this.state.phase = "success";
-        this.state.message = "Chrome انتقل بعيدًا عن صفحة الدخول؛ الجلسة محفوظة في نفس المتصفح.";
-        this.state.nextLocation = currentUrl.href;
-        if (this.state.lastPost?.outcome === "pending") {
-          this.state.lastPost = {
-            ...this.state.lastPost,
-            outcome: "success",
-            message: "فحص الجلسة أكد نجاح تسجيل الدخول.",
-            at: new Date().toISOString(),
-          };
-        }
-        this.#log("success", "session.check_success", this.state.message, {
-          urlPath: currentUrl.pathname,
-        });
-        return {
-          state: this.publicState(),
-          result: { kind: "success", message: this.state.message },
-        };
+        const restored = await this.#tryRestoreSession();
+        if (restored) return restored;
       }
 
       const content = await this.#page.content();
@@ -300,6 +302,8 @@ export class LoginManager {
         this.state.phase = "success";
         this.state.message = result.message;
         this.state.nextLocation = this.#page.url();
+        this.#authenticated = true;
+        await this.#persistSession();
         if (this.state.lastPost?.outcome === "pending") {
           this.state.lastPost = {
             ...this.state.lastPost,
@@ -328,6 +332,7 @@ export class LoginManager {
       );
     }
     await this.#resetBrowser();
+    await this.#clearPersistedSession();
     this.#lastPostAt = 0;
     this.state = this.#initialState();
     this.#log("info", "session.reset", "تم مسح الجلسة وحقول المتصفح المخصص.");
@@ -335,6 +340,7 @@ export class LoginManager {
   }
 
   async close() {
+    if (this.#authenticated) await this.#persistSession();
     await this.#resetBrowser({ allowPending: true });
   }
 
@@ -378,12 +384,15 @@ export class LoginManager {
       );
     }
 
+    const storageState = await this.#readPersistedSession();
     this.#context = await this.#browser.newContext({
       locale: "ar-EG",
       userAgent: this.options.userAgent,
       ignoreHTTPSErrors: true,
+      ...(storageState ? { storageState } : {}),
       ...(this.options.remoteMode ? { viewport: null } : {}),
     });
+    this.#persistedSessionAvailable = Boolean(storageState);
     await this.#context.route("**/*", async (route) => {
       const request = route.request();
       const type = request.resourceType();
@@ -527,6 +536,8 @@ export class LoginManager {
           .catch(() => {});
       }
       this.state.nextLocation = this.#page.url();
+      this.#authenticated = true;
+      await this.#persistSession();
       this.#log("success", "login.success", result.message, {
         attempt: this.state.attempt,
         status: response.status(),
@@ -659,10 +670,8 @@ export class LoginManager {
     try {
       const url = new URL(request.url());
       if (url.origin !== this.options.upstream.origin) return false;
-      const type = request.resourceType();
       const pathname = url.pathname.toLowerCase();
-      const captcha = pathname.endsWith("/codeimage.aspx");
-      return !(type === "font" || type === "media" || (type === "image" && !captcha));
+      return pathname.endsWith(".aspx") && request.isNavigationRequest();
     } catch {
       return false;
     }
@@ -719,12 +728,149 @@ export class LoginManager {
     this.#page = null;
     this.#context = null;
     this.#browser = null;
+    this.#authenticated = false;
+    this.#restoreAttempted = false;
     if (browser) await browser.close().catch(() => {});
     this.#trackedRequests.clear();
   }
 
   #signInUrl() {
     return new URL(this.options.signInPath, this.options.upstream).href;
+  }
+
+  #personalUrl() {
+    return new URL(this.options.personalPath ?? "/personal.aspx", this.options.upstream).href;
+  }
+
+  #currentPageSnapshot() {
+    if (!this.#page || this.#page.isClosed()) {
+      return { path: null, label: "Chrome غير مفتوح" };
+    }
+    try {
+      const url = new URL(this.#page.url());
+      const pathname = url.pathname || "/";
+      const lower = pathname.toLowerCase();
+      const label = lower.endsWith("/signin.aspx")
+        ? "صفحة تسجيل الدخول"
+        : lower.endsWith("/personal.aspx")
+          ? "صفحة البيانات والرغبات"
+          : pathname === "/"
+            ? "الصفحة الرئيسية"
+            : pathname;
+      return { path: pathname, label };
+    } catch {
+      return { path: null, label: "صفحة داخلية" };
+    }
+  }
+
+  async #tryRestoreSession() {
+    this.#restoreAttempted = true;
+    this.state.phase = "checking";
+    this.state.message = "جاري تجربة الجلسة المحفوظة على personal.aspx...";
+    this.#log("info", "session.restore_started", "جاري فحص الجلسة المحفوظة على personal.aspx.");
+    const startedAt = performance.now();
+
+    let response;
+    try {
+      response = await this.#page.goto(this.#personalUrl(), {
+        waitUntil: "domcontentloaded",
+        timeout: this.options.requestTimeoutMs,
+      });
+    } catch (error) {
+      this.#restoreAttempted = false;
+      this.state.phase = "uncertain";
+      this.state.message = "تعذر فحص الجلسة المحفوظة. احتفظنا بها ويمكن إعادة المحاولة.";
+      this.#log("error", "session.restore_failed", this.state.message, {
+        durationMs: Math.round(performance.now() - startedAt),
+        technical: safeTechnicalMessage(error),
+      });
+      return { state: this.publicState(), result: { kind: "uncertain", message: this.state.message } };
+    }
+
+    if (response?.status() >= 500) {
+      this.#restoreAttempted = false;
+      this.state.phase = "transient";
+      this.state.message = `personal.aspx أعادت HTTP ${response.status()}. الجلسة محفوظة ولم نمسحها.`;
+      this.#log("error", "session.restore_server_error", this.state.message, {
+        status: response.status(),
+        durationMs: Math.round(performance.now() - startedAt),
+        urlPath: "/personal.aspx",
+      });
+      return { state: this.publicState(), result: { kind: "transient", message: this.state.message } };
+    }
+
+    if (await this.#isPersonalPage()) {
+      this.#authenticated = true;
+      this.state.phase = "success";
+      this.state.message = "تم فتح personal.aspx مباشرة باستخدام الجلسة المحفوظة.";
+      this.state.nextLocation = this.#page.url();
+      this.state.lastDurationMs = Math.round(performance.now() - startedAt);
+      if (this.state.lastPost?.outcome === "pending") {
+        this.state.lastPost = {
+          ...this.state.lastPost,
+          outcome: "success",
+          message: "فحص personal.aspx أكد نجاح تسجيل الدخول.",
+          at: new Date().toISOString(),
+        };
+      }
+      await this.#persistSession();
+      this.#log("success", "session.restored", this.state.message, {
+        durationMs: this.state.lastDurationMs,
+        urlPath: "/personal.aspx",
+      });
+      await this.#page.bringToFront().catch(() => {});
+      return { state: this.publicState(), result: { kind: "success", restored: true, message: this.state.message } };
+    }
+
+    this.#authenticated = false;
+    await this.#context.clearCookies().catch(() => {});
+    await this.#clearPersistedSession();
+    this.#log("warn", "session.expired", "الجلسة المحفوظة انتهت؛ سنرجع لصفحة تسجيل الدخول.", {
+      durationMs: Math.round(performance.now() - startedAt),
+      urlPath: new URL(this.#page.url()).pathname,
+    });
+    return null;
+  }
+
+  async #isPersonalPage() {
+    try {
+      const currentUrl = new URL(this.#page.url());
+      if (!currentUrl.pathname.toLowerCase().endsWith("/personal.aspx")) return false;
+      return (
+        (await this.#page.locator(SELECTORS.personalForm).count()) === 1 &&
+        (await this.#page.locator(SELECTORS.acceptAssignment).count()) === 1
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async #readPersistedSession() {
+    const statePath = this.options.sessionStatePath;
+    if (!statePath) return null;
+    try {
+      const parsed = JSON.parse(await readFile(statePath, "utf8"));
+      if (!Array.isArray(parsed.cookies) || !Array.isArray(parsed.origins)) throw new Error("Invalid state");
+      return parsed;
+    } catch (error) {
+      if (error?.code !== "ENOENT") await rm(statePath, { force: true }).catch(() => {});
+      return null;
+    }
+  }
+
+  async #persistSession() {
+    const statePath = this.options.sessionStatePath;
+    if (!statePath || !this.#context) return;
+    await mkdir(path.dirname(statePath), { recursive: true });
+    await this.#context.storageState({ path: statePath });
+    await chmod(statePath, 0o600).catch(() => {});
+    this.#persistedSessionAvailable = true;
+  }
+
+  async #clearPersistedSession() {
+    const statePath = this.options.sessionStatePath;
+    if (statePath) await rm(statePath, { force: true }).catch(() => {});
+    this.#persistedSessionAvailable = false;
   }
 
   async #exclusive(action) {

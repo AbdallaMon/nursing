@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { chromium } from "playwright-core";
 import { LoginManager } from "../../src/login-manager.js";
 
@@ -10,13 +13,16 @@ const captchaPng = Buffer.from(
   "base64",
 );
 
-test("keeps the successful session in the same controlled browser", async (t) => {
+test("persists a successful session and restores personal.aspx in a new browser", async (t) => {
   process.env.HEADLESS = "1";
   process.env.BROWSER_CHANNEL = "chrome";
 
   let postedCookie = "";
   let postedBody = "";
   let postCount = 0;
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "nursing-session-test-"));
+  const sessionStatePath = path.join(stateDirectory, "session-state.json");
+  t.after(() => rm(stateDirectory, { recursive: true, force: true }));
   const upstream = createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     if (request.method === "GET" && url.pathname === "/Signin.aspx") {
@@ -39,12 +45,16 @@ test("keeps the successful session in the same controlled browser", async (t) =>
         response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         return response.end(loginPage("حاول الإتصال بالموقع في وقتِ لاحق"));
       }
-      response.writeHead(302, { Location: "/Choices.aspx" });
+      response.writeHead(302, { Location: "/personal.aspx" });
       return response.end();
     }
-    if (request.method === "GET" && url.pathname === "/Choices.aspx") {
+    if (request.method === "GET" && url.pathname === "/personal.aspx") {
+      if (!/ASP\.NET_SessionId=test-session/.test(request.headers.cookie ?? "")) {
+        response.writeHead(302, { Location: "/Signin.aspx" });
+        return response.end();
+      }
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      return response.end("<html><body><h1>Choices</h1></body></html>");
+      return response.end(personalPage());
     }
     response.writeHead(404).end();
   });
@@ -59,24 +69,27 @@ test("keeps the successful session in the same controlled browser", async (t) =>
   );
 
   const { port } = upstream.address();
-  const manager = new LoginManager({
+  const managerOptions = {
     upstream: new URL(`http://127.0.0.1:${port}/`),
     signInPath: "/Signin.aspx",
+    personalPath: "/personal.aspx",
+    sessionStatePath,
     requestTimeoutMs: 10_000,
     minPostIntervalMs: 0,
     remoteMode: true,
     userAgent: "Login helper integration test",
     browserType: chromium,
     random: () => 0,
-  });
+  };
+  const manager = new LoginManager(managerOptions);
   t.after(() => manager.close());
 
   const prepared = await manager.prepare();
   assert.equal(prepared.state.phase, "prepared");
   assert.equal(prepared.state.busy, false);
   assert.equal(manager.captcha().contentType, "image/png");
-  assert.ok(prepared.state.requestStats.total >= 2);
-  assert.ok(prepared.state.requestStats.get >= 2);
+  assert.ok(prepared.state.requestStats.total >= 1);
+  assert.ok(prepared.state.requestStats.get >= 1);
   assert.equal(prepared.state.requestStats.post, 0);
 
   const firstResult = await manager.submit({
@@ -104,7 +117,10 @@ test("keeps the successful session in the same controlled browser", async (t) =>
   assert.match(postedCookie, /ASP\.NET_SessionId=test-session/);
   assert.match(postedBody, /__VIEWSTATE=fresh-state/);
   assert.match(postedBody, /txtNationalNumber=12345678901234/);
-  assert.match(result.state.nextLocation, /\/Choices\.aspx$/);
+  assert.match(result.state.nextLocation, /\/personal\.aspx$/);
+  assert.equal(result.state.sessionPersisted, true);
+  assert.equal(result.state.currentPage.path, "/personal.aspx");
+  assert.match(await readFile(sessionStatePath, "utf8"), /test-session/);
 
   const eventsJson = JSON.stringify(manager.events(50));
   assert.match(eventsJson, /login\.success/);
@@ -115,8 +131,9 @@ test("keeps the successful session in the same controlled browser", async (t) =>
   assert.equal(requestStats.post, 2);
   assert.equal(requestStats.completedPost, 2);
   assert.equal(requestStats.failedPost, 0);
-  assert.ok(requestStats.completedGet >= 4);
-  assert.ok(requestStats.total >= 6);
+  assert.ok(requestStats.completedGet >= 3);
+  assert.ok(requestStats.total >= 5);
+  assert.doesNotMatch(eventsJson, /CodeImage\.aspx|WebResource\.axd|Styles\.css/);
   manager.resetEventsForDashboard();
   assert.equal(manager.events(50).length, 1);
   assert.equal(manager.events(50)[0].type, "dashboard.opened");
@@ -124,6 +141,17 @@ test("keeps the successful session in the same controlled browser", async (t) =>
   assert.equal(manager.publicState().requestStats.get, 0);
   assert.equal(manager.publicState().requestStats.post, 0);
   assert.equal(manager.publicState().lastPost, null);
+
+  await manager.close();
+  const restoredManager = new LoginManager(managerOptions);
+  t.after(() => restoredManager.close());
+  const restored = await restoredManager.prepare();
+  assert.equal(restored.result.kind, "success");
+  assert.equal(restored.result.restored, true);
+  assert.equal(restored.state.authenticated, true);
+  assert.equal(restored.state.sessionPersisted, true);
+  assert.equal(restored.state.currentPage.path, "/personal.aspx");
+  assert.equal(postCount, 2);
 });
 
 function loginPage(error = "") {
@@ -137,6 +165,15 @@ function loginPage(error = "") {
       <img src="CodeImage.aspx" alt="Hidden Code" width="120" height="80" />
       <input name="_ctl0:ContentPlaceHolder1:txtCertainNumber" type="text" />
       <input name="_ctl0:ContentPlaceHolder1:btnOk" type="submit" value="موافق" />
+    </form>
+  </body></html>`;
+}
+
+function personalPage() {
+  return `<!doctype html><html><body>
+    <form id="aspnetForm" method="post" action="personal.aspx">
+      <input type="hidden" name="__VIEWSTATE" value="personal-state" />
+      <input name="_ctl0:ContentPlaceHolder1:btnAcceptTakleef" type="submit" value="التالي" />
     </form>
   </body></html>`;
 }

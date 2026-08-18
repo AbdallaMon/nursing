@@ -15,8 +15,11 @@ services:
       BROWSER_CHANNEL: chromium
       DISPLAY: ":99"
       DASHBOARD_PORT: "4317"
+      SESSION_STATE_PATH: "/data/session-state.json"
       REMOTE_SCREEN_WIDTH: "1440"
       REMOTE_SCREEN_HEIGHT: "900"
+    volumes:
+      - nursing-session:/data
     expose:
       - "3000"
     shm_size: "1gb"
@@ -28,3 +31,6 @@ services:
       timeout: 5s
       start_period: 40s
       retries: 5
+
+volumes:
+  nursing-session:

@@ -26,6 +26,8 @@ export const config = Object.freeze({
     "/browser/vnc_lite.html?autoconnect=true&resize=scale&reconnect=true&path=browser/websockify",
   upstream,
   signInPath: "/Signin.aspx",
+  personalPath: "/personal.aspx",
+  sessionStatePath: process.env.SESSION_STATE_PATH?.trim() || null,
   requestTimeoutMs: clamp(
     process.env.REQUEST_TIMEOUT_MS,
     400_000,
